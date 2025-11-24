@@ -1,0 +1,745 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Clinic Schedule Generator</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
+    <style>
+        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background-color: #f9f9f9; color: #333; line-height: 1.6; }
+        header { background-color: #D9534F; color: white; padding: 1rem 2rem; text-align: center; }
+        .container { display: grid; grid-template-columns: 1fr 3fr; gap: 2rem; max-width: 1800px; margin: 2rem auto; padding: 1rem; }
+        @media (max-width: 1200px) { .container { grid-template-columns: 1fr; } }
+        .input-section, .output-section { background: white; padding: 2rem; border-radius: 8px; box-shadow: 0 4px 12px rgba(0, 0, 0, 0.05); }
+        h2 { color: #D9534F; border-bottom: 2px solid #eee; padding-bottom: 0.5rem; }
+        label { display: block; font-weight: 600; margin-top: 1rem; margin-bottom: 0.25rem; }
+        input[type="text"], input[type="time"], input[type="number"] { width: 100%; padding: 0.75rem; border: 1px solid #ccc; border-radius: 4px; box-sizing: border-box; font-size: 1rem; }
+        .day-selector { display: grid; grid-template-columns: 60px 1fr auto 1fr; gap: 0.5rem; align-items: center; margin-bottom: 0.5rem; }
+        .day-selector label { margin: 0; font-weight: normal; }
+        button { display: inline-block; padding: 0.75rem 1.5rem; margin-top: 1.5rem; background-color: #50C877; color: white; font-size: 1rem; font-weight: 600; border: none; border-radius: 4px; cursor: pointer; transition: background-color 0.2s; }
+        button:hover { background-color: #3E9E60; }
+        #generate-button { background-color: #F5A623; width: 100%; }
+        #generate-button:hover { background-color: #D98C1E; }
+        .action-btn { background-color: #337ab7; width: 100%; margin-top: 0.5rem; } 
+        .action-btn:hover { background-color: #286090; }
+        .file-btn-group { display: flex; gap: 10px; margin-top: 1rem; }
+        #clinician-list { list-style: none; padding: 0; }
+        #clinician-list li { background: #f0f6ff; padding: 0.5rem 1rem; border-radius: 4px; margin-bottom: 0.5rem; font-size: 0.9rem; display: flex; justify-content: space-between; align-items: center; }
+        #clinician-list li button { background: #e0e0e0; color: #333; font-size: 0.8rem; padding: 0.25rem 0.5rem; margin: 0; width: auto; }
+        
+        .capacity-table { width: 100%; border-collapse: collapse; margin-bottom: 1rem; }
+        .capacity-table th { background: #eee; padding: 8px; text-align: left; font-size: 0.9rem; }
+        .capacity-table td { border-bottom: 1px solid #eee; padding: 8px; font-size: 0.9rem; vertical-align: top; }
+        .combo-select { width: 100%; padding: 5px; }
+        .breakdown-text { font-size: 0.85rem; color: #666; margin-top: 4px; }
+
+        #schedule-results h3 { margin-top: 2rem; color: #D9534F; page-break-before: always; }
+        #schedule-results h3:first-child { page-break-before: auto; }
+        .schedule-table { width: 100%; border-collapse: collapse; margin-bottom: 2rem; font-size: 0.85em; table-layout: fixed; }
+        .schedule-table th, .schedule-table td { border: 1px solid #ddd; padding: 4px; text-align: center; vertical-align: middle; height: 15px; line-height: 1.2; overflow: hidden; }
+        .schedule-table thead th { background-color: #D9534F; color: white; }
+        .schedule-table tbody th { background-color: #f2f2f2; width: 60px; font-weight: bold; }
+        
+        /* Colors */
+        .color-hae-room-a { background-color: #FFB3B3; color: #800000; } 
+        .color-hae-room-b { background-color: #B34747; color: #FFFFFF; } 
+        .color-retest-room-a { background-color: #E0B3FF; color: #4D0080; } 
+        .color-retest-room-b { background-color: #8C4DFF; color: #FFFFFF; } 
+        .color-adjust-room-a { background-color: #CCFFFF; color: #008080; } 
+        .color-adjust-room-b { background-color: #009999; color: #FFFFFF; } 
+        .color-fitting { background-color: #B3CCFF; color: #004C99; } 
+        .color-follow-up { background-color: #FFCCE5; color: #CC0066; } 
+        .color-hearingtest { background-color: #CCFFCC; color: #006600; } 
+        .color-tech { background-color: #FFFFCC; color: #999900; } 
+        .break-slot { background-color: #ffc266; color: #723c00; font-weight: bold; }
+        .admin-slot { background-color: #e6ffe6; color: #28a745; }
+        .off-slot { background-color: #f7f7f7; color: #999; }
+        .error-slot { background-color: #ff9999; color: #990000; font-weight: bold; }
+        #schedule-output { max-height: 800px; overflow-y: auto; }
+        #unscheduled-results { background: #fdf0f0; border: 1px solid #ffcccc; color: #cc0000; padding: 1rem; }
+        
+        input[type="range"] { width: 100%; margin: 10px 0; }
+        .range-labels { display: flex; justify-content: space-between; font-size: 0.85rem; color: #666; font-weight: bold; }
+    </style>
+</head>
+<body>
+    <header>
+        <h1>Clinic Schedule Generator</h1>
+        <p><strong>Exact-Fit Optimization:</strong> HAEs limit based on 1h remaining in global day.</p>
+    </header>
+    <main class="container">
+        <div class="input-section">
+            <h2>Step 1: Add Clinicians & Hours</h2>
+            <div class="file-btn-group">
+                <button id="save-roster-btn" class="action-btn" style="background-color: #5bc0de; border-color: #46b8da;">Save Roster</button>
+                <button id="load-roster-trigger" class="action-btn" style="background-color: #5bc0de; border-color: #46b8da;">Load Roster</button>
+                <input type="file" id="load-roster-input" accept=".json" style="display: none;">
+            </div>
+            <hr>
+            <form id="clinician-form">
+                <label for="clinician-name">Clinician Name:</label>
+                <input type="text" id="clinician-name" placeholder="e.g., Dr. Smith" required>
+                <label>Working Hours (Shifts > 5h get a mandatory 1h lunch):</label>
+                <div id="day-inputs-container"></div>
+                <button type="submit">Add Clinician</button>
+            </form>
+            <hr>
+            <h3>Active Clinicians:</h3>
+            <ul id="clinician-list"></ul>
+        </div>
+        <div class="output-section">
+            <h2>Step 2: Daily Optimization & Targets</h2>
+            <p>Select HAEs (75m) and Other (60m) appointments for Rooms A/B. Capacity is limited by Rooms (2 max) or Staff.</p>
+            
+            <table class="capacity-table">
+                <thead>
+                    <tr>
+                        <th>Day</th>
+                        <th>A/B Capacity (min)</th>
+                        <th>Select Mix (HAEs + 60m)</th>
+                        <th>HAE Breakdown</th>
+                    </tr>
+                </thead>
+                <tbody id="capacity-tbody">
+                    <tr><td colspan="4" style="text-align:center; color:#999;">Add clinicians to see options...</td></tr>
+                </tbody>
+            </table>
+
+            <div style="margin-top: 2rem; margin-bottom: 1.5rem;">
+                <label for="retest-split">Of the 60m appointments (A/B), how many should be Retests?</label>
+                <div style="display: flex; align-items: center; gap: 10px;">
+                    <span style="font-size: 0.9rem; font-weight: bold; color: #4D0080;">Retest (P2)</span>
+                    <input type="range" id="retest-split" min="0" max="100" value="50">
+                    <span style="font-size: 0.9rem; font-weight: bold; color: #008080;">Adjust (P3)</span>
+                </div>
+                <div class="range-labels"><span id="retest-pct-display">50% Retest</span><span id="adjust-pct-display">50% Adjust</span></div>
+            </div>
+
+            <button id="generate-button">Generate Schedule</button>
+            <button id="export-pdf-button" class="action-btn" style="display: none;">Export Schedule to PDF</button>
+            
+            <div id="schedule-output">
+                <h3>Generated Schedule:</h3>
+                <div id="schedule-results"></div> 
+                <h3>Scheduling Report:</h3>
+                <pre id="unscheduled-results"></pre>
+            </div>
+        </div>
+    </main>
+    <script>
+        document.addEventListener("DOMContentLoaded", () => {
+            const ALL_ROOMS = ['Room-A', 'Room-B', 'Room-C', 'Room-D', 'Room-E'];
+            const TECH_ROOM_PRIORITY = ['Room-C', 'Room-D', 'Room-E', 'Room-A', 'Room-B'];
+            const ALL_APPOINTMENT_RULES = {
+                'HAE': { duration: 75, rooms: ['Room-A', 'Room-B'], priority: 1 },
+                'Retest': { duration: 60, rooms: ['Room-A', 'Room-B'], priority: 2 },      
+                'Adjust': { duration: 60, rooms: ['Room-A', 'Room-B'], priority: 3 },       
+                'Fitting': { duration: 60, rooms: ['Room-C'], priority: 4, type: 'capacity_filler' },             
+                'Follow-up': { duration: 30, rooms: ['Room-D'], priority: 5, type: 'capacity_filler' },           
+                'Hearing Test': { duration: 45, rooms: ['Room-E'], priority: 6, type: 'capacity_filler' },        
+                'Tech': { duration: 15, rooms: [], priority: 7, type: 'capacity_filler' }                       
+            };
+            const DAY_ORDER = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+            const SLOT_DURATION = 15;
+            let clinicians = [], clinicianSchedules = {}, roomSchedules = {}, weeklyTargets = {}, weeklyFulfillment = {};
+
+            const dayInputsContainer = document.getElementById("day-inputs-container");
+            DAY_ORDER.forEach(day => {
+                const div = document.createElement('div'); div.className = 'day-selector';
+                div.innerHTML = `<label><input type="checkbox" data-day="${day}" checked> ${day}</label><input type="time" id="${day}-start" value="09:00"> to <input type="time" id="${day}-end" value="17:00">`;
+                dayInputsContainer.appendChild(div);
+            });
+
+            const retestSplitInput = document.getElementById("retest-split");
+            const retestPctDisplay = document.getElementById("retest-pct-display");
+            const adjustPctDisplay = document.getElementById("adjust-pct-display");
+            retestSplitInput.addEventListener('input', (e) => {
+                retestPctDisplay.textContent = `${e.target.value}% Retest`;
+                adjustPctDisplay.textContent = `${100 - e.target.value}% Adjust`;
+            });
+
+            // --- EXACT FIT CALCULATOR LOGIC ---
+            function updateCapacityTable() {
+                const tbody = document.getElementById("capacity-tbody");
+                tbody.innerHTML = "";
+
+                if (clinicians.length === 0) {
+                    tbody.innerHTML = '<tr><td colspan="4" style="text-align:center; color:#999;">Add clinicians to see options...</td></tr>';
+                    return;
+                }
+
+                DAY_ORDER.forEach(day => {
+                    const workingClinicians = clinicians.filter(c => c.availability[day]);
+                    if (workingClinicians.length === 0) return;
+
+                    let timeline = new Array(1440).fill(0);
+                    let totalStaffMinutes = 0;
+                    
+                    workingClinicians.forEach(c => {
+                        const start = timeToMinutes(c.availability[day].start);
+                        const end = timeToMinutes(c.availability[day].end);
+                        let dur = end - start;
+                        
+                        for(let t=start; t<end; t++) timeline[t]++;
+
+                        if (c.availability[day].lunchConstraint && c.availability[day].lunchConstraint.initialRequired) {
+                            dur -= 60;
+                        }
+                        totalStaffMinutes += Math.max(0, dur);
+                    });
+
+                    let totalRoomMinutes = 0;
+                    for(let t=0; t<1440; t++) {
+                        if(timeline[t] > 0) {
+                            totalRoomMinutes += Math.min(timeline[t], 2);
+                        }
+                    }
+                    
+                    const effectiveCapacity = Math.min(totalRoomMinutes, totalStaffMinutes);
+                    const hours = (effectiveCapacity / 60).toFixed(1);
+
+                    let solutions = [];
+                    const maxHAE = Math.floor(effectiveCapacity / 75);
+                    
+                    for (let h = maxHAE; h >= 0; h--) {
+                        const remaining = effectiveCapacity - (h * 75);
+                        if (remaining >= 0 && remaining % 60 === 0) {
+                            const s60 = remaining / 60;
+                            solutions.push({ hae: h, s60: s60 });
+                        }
+                    }
+                    
+                    if (solutions.length === 0) {
+                        for (let h = maxHAE; h >= 0; h--) {
+                            const remaining = effectiveCapacity - (h * 75);
+                            const s60 = Math.floor(remaining / 60);
+                            const waste = remaining - (s60 * 60);
+                            if (waste < 45) {
+                                solutions.push({ hae: h, s60: s60, note: `(~${waste}m gap)` });
+                            }
+                        }
+                    }
+
+                    const tr = document.createElement('tr');
+                    let optionsHtml = solutions.map(sol => 
+                        `<option value="${sol.hae},${sol.s60}">${sol.hae} HAEs & ${sol.s60} 60m Appts ${sol.note || ''}</option>`
+                    ).join('');
+                    
+                    if (solutions.length === 0) optionsHtml = '<option value="0,0">No perfect fit found</option>';
+
+                    tr.innerHTML = `
+                        <td><strong>${day}</strong></td>
+                        <td>${effectiveCapacity} min (${hours}h)</td>
+                        <td>
+                            <select id="combo-${day}" class="combo-select" onchange="updateDistributionDisplay('${day}')">
+                                ${optionsHtml}
+                            </select>
+                        </td>
+                        <td id="dist-display-${day}" class="breakdown-text"></td>
+                    `;
+                    tbody.appendChild(tr);
+                    setTimeout(() => updateDistributionDisplay(day), 0);
+                });
+            }
+
+            window.updateDistributionDisplay = (day) => {
+                const select = document.getElementById(`combo-${day}`);
+                if(!select) return;
+                const [haeCount, s60Count] = select.value.split(',').map(Number);
+                const display = document.getElementById(`dist-display-${day}`);
+                
+                const workingClinicians = clinicians.filter(c => c.availability[day]);
+                let totalMin = 0;
+                let cMins = {};
+                workingClinicians.forEach(c => {
+                    const start = timeToMinutes(c.availability[day].start);
+                    const end = timeToMinutes(c.availability[day].end);
+                    let dur = end - start;
+                    if (c.availability[day].lunchConstraint && c.availability[day].lunchConstraint.initialRequired) dur -= 60;
+                    const m = Math.max(0, dur);
+                    cMins[c.id] = m;
+                    totalMin += m;
+                });
+
+                if(totalMin === 0) { display.textContent = "-"; return; }
+                
+                const dist = workingClinicians.map(c => {
+                     const share = Math.round((cMins[c.id] / totalMin) * haeCount);
+                     return `${c.name}: ~${share}`;
+                });
+                display.textContent = dist.join(', ');
+            };
+
+            const saveRosterBtn = document.getElementById("save-roster-btn");
+            const loadRosterTrigger = document.getElementById("load-roster-trigger");
+            const loadRosterInput = document.getElementById("load-roster-input");
+            
+            saveRosterBtn.addEventListener('click', () => {
+                if (clinicians.length === 0) { alert("No clinicians to save."); return; }
+                const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(clinicians));
+                const dl = document.createElement('a'); dl.setAttribute("href", dataStr); dl.setAttribute("download", "clinician_roster.json");
+                document.body.appendChild(dl); dl.click(); dl.remove();
+            });
+            loadRosterTrigger.addEventListener('click', () => loadRosterInput.click());
+            loadRosterInput.addEventListener('change', (event) => {
+                const file = event.target.files[0]; if (!file) return;
+                const reader = new FileReader();
+                reader.onload = (e) => {
+                    try {
+                        const loadedData = JSON.parse(e.target.result);
+                        if (Array.isArray(loadedData) && loadedData.length > 0 && loadedData[0].id) {
+                            clinicians = loadedData;
+                            clinicianSchedules = {};
+                            clinicians.forEach(c => clinicianSchedules[c.id] = {});
+                            renderClinicianList(); updateCapacityTable(); alert("Roster loaded!");
+                        } else alert("Invalid file.");
+                    } catch (err) { alert("Error reading file."); }
+                }; reader.readAsText(file); loadRosterInput.value = '';
+            });
+
+            document.getElementById("export-pdf-button").addEventListener('click', () => {
+                const element = document.getElementById('schedule-results');
+                if (window.html2pdf) html2pdf().set({ margin: 0.2, filename: 'Clinic_Schedule.pdf', image: { type: 'jpeg', quality: 0.98 }, html2canvas: { scale: 2 }, jsPDF: { unit: 'in', format: 'letter', orientation: 'landscape' }, pagebreak: { mode: ['avoid-all', 'css', 'legacy'] } }).from(element).save();
+                else alert("PDF library not loaded.");
+            });
+
+            document.getElementById("clinician-form").addEventListener("submit", (e) => {
+                e.preventDefault(); 
+                const name = document.getElementById("clinician-name").value.trim();
+                if (!name) return;
+                const id = name.toLowerCase().replace(/ /g, '_').replace(/[^\w_]/g, ''); 
+                if (clinicians.some(c => c.id === id)) { alert("Clinician already added!"); return; }
+                let totalHours = 0, availability = {};
+                DAY_ORDER.forEach(day => {
+                    const cb = document.querySelector(`input[data-day="${day}"]`);
+                    if (cb.checked) {
+                        const start = document.getElementById(`${day}-start`).value, end = document.getElementById(`${day}-end`).value;
+                        if (!start || !end || timeToMinutes(start) >= timeToMinutes(end)) return;
+                        const sMin = timeToMinutes(start), eMin = timeToMinutes(end), dur = eMin - sMin;
+                        totalHours += dur / 60;
+                        let lunch = { required: false, initialRequired: false, earliest: 0, latest: 0, duration: 0 };
+                        if (dur > 300) {
+                            // Lunch Window 3.5h - 4.5h
+                            lunch = { required: true, initialRequired: true, duration: 60, earliest: sMin + 210, latest: sMin + 270 }; 
+                            totalHours -= 1;
+                        }
+                        availability[day] = { start, end, lunchConstraint: lunch };
+                    }
+                });
+                clinicians.push({ id, name, availability, totalHours: Math.max(0, totalHours) });
+                clinicianSchedules[id] = {}; renderClinicianList(); updateCapacityTable(); document.getElementById("clinician-form").reset();
+            });
+
+            document.getElementById('clinician-list').addEventListener('click', (e) => {
+                if (e.target.tagName === 'BUTTON') {
+                    const idToRemove = e.target.dataset.id;
+                    const idx = clinicians.findIndex(c => c.id === idToRemove);
+                    if (idx > -1) {
+                        clinicians.splice(idx, 1);
+                        delete clinicianSchedules[idToRemove];
+                        renderClinicianList();
+                        updateCapacityTable();
+                    }
+                }
+            });
+
+            function renderClinicianList() {
+                const list = document.getElementById("clinician-list");
+                list.innerHTML = "";
+                clinicians.forEach((c) => {
+                    const li = document.createElement("li");
+                    li.innerHTML = `<span><strong>${c.name}</strong> (${c.totalHours.toFixed(1)} hrs available/wk)</span> <button data-id="${c.id}">Remove</button>`;
+                    list.appendChild(li);
+                });
+            }
+
+            document.getElementById("generate-button").addEventListener("click", () => {
+                initializeSchedules();
+                let unscheduled = [];
+                if (clinicians.length === 0) { alert("Please add clinicians."); return; }
+
+                // 1. READ TARGETS FROM DAILY COMBO
+                let dailyTargets = {};
+                DAY_ORDER.forEach(day => {
+                    const sel = document.getElementById(`combo-${day}`);
+                    if(sel) {
+                        const [h, s] = sel.value.split(',').map(Number);
+                        dailyTargets[day] = { HAE: h, S60: s };
+                    }
+                });
+                
+                // 2. Lunches
+                scheduleMandatoryLunches();
+
+                // 3. Schedule HAE & 60m (Retest/Adjust) by Day using POOL allocation
+                for (const day of DAY_ORDER) {
+                    if (!dailyTargets[day]) continue;
+                    
+                    const haeCount = dailyTargets[day].HAE;
+                    const retestRatio = (parseInt(document.getElementById("retest-split").value) || 50) / 100;
+                    const retestCount = Math.round(dailyTargets[day].S60 * retestRatio);
+                    const adjustCount = dailyTargets[day].S60 - retestCount;
+                    
+                    // Build a "Task List" for the day
+                    let taskList = [];
+                    for(let i=0; i<haeCount; i++) taskList.push('HAE');
+                    for(let i=0; i<retestCount; i++) taskList.push('Retest');
+                    for(let i=0; i<adjustCount; i++) taskList.push('Adjust');
+                    
+                    // Sort Tasks: HAE first, then others
+                    taskList.sort((a,b) => ALL_APPOINTMENT_RULES[a].priority - ALL_APPOINTMENT_RULES[b].priority);
+                    
+                    // Assign Tasks Globally (No per-clinician pre-assignment, find any slot)
+                    for (const type of taskList) {
+                        const duration = ALL_APPOINTMENT_RULES[type].duration;
+                        const rooms = ALL_APPOINTMENT_RULES[type].rooms;
+                        
+                        // Try to find ANY clinician/room slot for this task
+                        const slot = findGlobalSlot(type, duration, rooms, day);
+                        
+                        if (slot) {
+                            bookSlot(slot.clinicianId, day, slot.start, duration, type, slot.room);
+                            if(slot.room) bookSlot(slot.room, day, slot.start, duration, type);
+                        } else {
+                            unscheduled.push({ type, day, reason: `Capacity limit reached or fragmentation prevented scheduling.` });
+                        }
+                    }
+                }
+
+                // 4. Capacity Fillers (P4-P7)
+                scheduleCapacityFillersTimeFirst();
+                fillGapsWithAdmin();
+
+                displayResults(unscheduled);
+                document.getElementById("export-pdf-button").style.display = 'inline-block';
+            });
+
+            // LOGIC
+            
+            function findGlobalSlot(type, duration, rooms, day) {
+                // Try to find the best slot across ALL available clinicians
+                const workingClinicians = clinicians.filter(c => c.availability[day]);
+                // Randomize check order for fairness
+                shuffleArray(workingClinicians);
+                
+                for (const c of workingClinicians) {
+                    const slot = findSlotForAssignment(c.id, type, duration, rooms, day);
+                    if (slot) {
+                        // Return with clinician ID attached
+                        return { ...slot, clinicianId: c.id };
+                    }
+                }
+                return null;
+            }
+
+            function scheduleCapacityFillersTimeFirst() {
+                const FILLERS = Object.keys(ALL_APPOINTMENT_RULES).filter(k => ALL_APPOINTMENT_RULES[k].type === 'capacity_filler')
+                    .map(k => ({ name: k, ...ALL_APPOINTMENT_RULES[k] })).sort((a,b) => a.priority - b.priority);
+                
+                for (const day of DAY_ORDER) {
+                    const workers = clinicians.filter(c => c.availability[day]);
+                    if (!workers.length) continue;
+                    let minS = Infinity, maxE = 0;
+                    workers.forEach(c => { minS = Math.min(minS, timeToMinutes(c.availability[day].start)); maxE = Math.max(maxE, timeToMinutes(c.availability[day].end)); });
+
+                    for (let t = minS; t < maxE; t += 15) {
+                        const timeStr = minutesToTime(t);
+                        const shuffled = shuffleArray([...workers]);
+                        for (const c of shuffled) {
+                            if (!c.availability[day] || t < timeToMinutes(c.availability[day].start) || t >= timeToMinutes(c.availability[day].end)) continue;
+                            if (!isSlotFree(c.id, day, timeStr, 15)) continue;
+
+                            for (const rule of FILLERS) {
+                                if (t + rule.duration > timeToMinutes(c.availability[day].end)) continue;
+                                if (!isSlotFree(c.id, day, timeStr, rule.duration)) continue;
+
+                                let rb = null;
+                                const rooms = rule.name === 'Tech' ? TECH_ROOM_PRIORITY : rule.rooms;
+                                for (const r of rooms) {
+                                    if ((rule.name === 'Tech' || rule.rooms.includes(r)) && isSlotFree(r, day, timeStr, rule.duration)) {
+                                        rb = r; break;
+                                    }
+                                }
+                                if (rule.name === 'Tech' && !rb) rb = null;
+                                else if (!rb) continue;
+
+                                if (rule.name === 'Tech' || rb) {
+                                    bookSlot(c.id, day, timeStr, rule.duration, rule.name, rb);
+                                    if (rb) bookSlot(rb, day, timeStr, rule.duration, rule.name);
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            function scheduleMandatoryLunches() {
+                for (const day of DAY_ORDER) {
+                    let cands = clinicians.filter(c => c.availability[day] && c.availability[day].lunchConstraint.required);
+                    cands.sort((a,b) => b.totalHours - a.totalHours);
+                    let booked = [];
+                    cands.forEach(c => {
+                        const lc = c.availability[day].lunchConstraint;
+                        let bestT = -1, bestScore = -Infinity;
+                        
+                        for (let t = lc.earliest; t <= lc.latest; t+=15) {
+                            if (t + 60 > timeToMinutes(c.availability[day].end)) continue;
+                            if (!isSlotFree(c.id, day, minutesToTime(t), 60)) continue;
+                            let overlap = booked.some(b => t < b.e && (t+60) > b.s);
+                            let score = overlap ? -1000 : 1000; score -= t;
+                            if (score > bestScore) { bestScore = score; bestT = t; }
+                        }
+                        if (bestT === -1) {
+                             const shiftS = timeToMinutes(c.availability[day].start);
+                             const shiftE = timeToMinutes(c.availability[day].end);
+                             for (let t = shiftS; t <= shiftE - 60; t+=15) {
+                                 if (!isSlotFree(c.id, day, minutesToTime(t), 60)) continue;
+                                 bestT = t; break;
+                             }
+                        }
+                        if (bestT !== -1) {
+                            bookSlot(c.id, day, minutesToTime(bestT), 60, 'LUNCH', null);
+                            c.availability[day].lunchConstraint.required = false;
+                            booked.push({s: bestT, e: bestT+60});
+                        }
+                    });
+                }
+            }
+
+            function findSlotForAssignment(cId, type, dur, rooms, day) {
+                const c = clinicians.find(x => x.id === cId);
+                const dInfo = c.availability[day];
+                if (!dInfo) return null;
+                let valid = [];
+                const s = timeToMinutes(dInfo.start), e = timeToMinutes(dInfo.end);
+
+                // Find last scheduled shift end time for the day to set the HAE limit
+                let lastShiftEnd = 0;
+                clinicians.forEach(cl => {
+                    if (cl.availability[day]) {
+                        lastShiftEnd = Math.max(lastShiftEnd, timeToMinutes(cl.availability[day].end));
+                    }
+                });
+                const HAE_LIMIT = lastShiftEnd - 60; // 1 hour before last shift end
+
+                for (let t = s; t <= e - dur; t += 15) {
+                    if (type === 'HAE' && (t + dur > HAE_LIMIT)) break;
+                    if (type === 'HAE') {
+                        const t800 = 480, t830 = 510;
+                        if (t > t800 && t < t830) continue;
+                        if (t === t800) {
+                            let has8am = false;
+                            clinicians.forEach(cl => {
+                                if (clinicianSchedules[cl.id]?.[day]?.some(b => b.type === 'HAE' && timeToMinutes(b.start) === t800)) has8am = true;
+                            });
+                            if (has8am) continue;
+                        }
+                    }
+
+                    const str = minutesToTime(t);
+                    if (isSlotFree(cId, day, str, dur)) {
+                        let rb = null;
+                        for (const r of rooms) { if (isSlotFree(r, day, str, dur)) { rb = r; break; } }
+                        if (rb) valid.push({t, str, rb});
+                    }
+                }
+                if (!valid.length) return null;
+                
+                const exist = (clinicianSchedules[cId]?.[day] || []).filter(b => b.type === type).map(b => timeToMinutes(b.start));
+                let best = null, maxS = -Infinity;
+                const mid = (s+e)/2;
+
+                valid.forEach(v => {
+                    let score = 0;
+                    if (!exist.length) score = -Math.abs(v.t - mid);
+                    else {
+                        let minD = Infinity;
+                        exist.forEach(ex => { const d = Math.abs(v.t - ex); if(d < minD) minD = d; });
+                        score = minD;
+                    }
+                    if (score > maxS) { maxS = score; best = v; }
+                });
+
+                return best ? { start: best.str, room: best.rb } : null;
+            }
+
+            function fillGapsWithAdmin() {
+                for (const day of DAY_ORDER) {
+                    clinicians.forEach(c => {
+                        if(!c.availability[day]) return;
+                        const s = timeToMinutes(c.availability[day].start), e = timeToMinutes(c.availability[day].end);
+                        for(let t=s; t<e; t+=15) {
+                            if (isSlotFree(c.id, day, minutesToTime(t), 15)) {
+                                let room = getLastUsedRoom(c.id, day);
+                                if (!room || !isSlotFree(room, day, minutesToTime(t), 15)) room = null;
+                                bookSlot(c.id, day, minutesToTime(t), 15, 'Admin Time', room);
+                                if(room) bookSlot(room, day, minutesToTime(t), 15, 'Admin Time');
+                            }
+                        }
+                    });
+                }
+            }
+            
+            function getLastUsedRoom(clinicianId, day) {
+                const bookings = clinicianSchedules[clinicianId] && clinicianSchedules[clinicianId][day];
+                if (!bookings || bookings.length === 0) return null;
+                const lastBooking = bookings[bookings.length - 1];
+                if (lastBooking.type !== 'LUNCH' && lastBooking.type !== 'Admin Time') return lastBooking.room || null; 
+                return null;
+            }
+
+            function isSlotFree(id, day, str, dur) {
+                const sched = (ALL_ROOMS.includes(id) ? roomSchedules : clinicianSchedules)[id]?.[day];
+                if (!sched) return true;
+                const s = timeToMinutes(str), e = s + dur;
+                for(const b of sched) {
+                    const bs = timeToMinutes(b.start), be = bs + b.duration;
+                    if (s < be && e > bs) return false;
+                }
+                return true;
+            }
+
+            function bookSlot(id, day, str, dur, type, room=null) {
+                const sched = (ALL_ROOMS.includes(id) ? roomSchedules : clinicianSchedules)[id];
+                if (!sched[day]) sched[day] = [];
+                sched[day].push({ start: str, duration: dur, type, room });
+                sched[day].sort((a,b) => timeToMinutes(a.start) - timeToMinutes(b.start));
+            }
+
+            function initializeSchedules() {
+                roomSchedules = {}; ALL_ROOMS.forEach(r => roomSchedules[r] = {});
+                clinicianSchedules = {}; 
+                clinicians.forEach(c => {
+                    clinicianSchedules[c.id] = {};
+                    for(const d in c.availability) {
+                        clinicianSchedules[c.id][d] = [];
+                        if(c.availability[d].lunchConstraint) c.availability[d].lunchConstraint.required = c.availability[d].lunchConstraint.initialRequired;
+                    }
+                });
+            }
+
+            function getBookingAtSlot(resourceId, day, slotStartMin) {
+                const isRoom = ALL_ROOMS.includes(resourceId);
+                const schedule = isRoom ? roomSchedules : clinicianSchedules;
+                const bookings = schedule[resourceId] && schedule[resourceId][day] ? schedule[resourceId][day] : [];
+                for (const booking of bookings) {
+                    const bookingStartMin = timeToMinutes(booking.start);
+                    const bookingEndMin = bookingStartMin + booking.duration;
+                    if (slotStartMin >= bookingStartMin && slotStartMin < bookingEndMin) return booking;
+                }
+                return null;
+            }
+
+            function generateDailyScheduleTable(day, clinicians) {
+                if (!clinicians.some(c => c.availability[day])) return ''; 
+                const START_OF_DAY_MIN = 8 * 60; 
+                const END_OF_DAY_MIN = 20 * 60 + 15; 
+                let tableHTML = `
+                    <h3>${day} Schedule</h3>
+                    <table class="schedule-table">
+                        <thead>
+                            <tr>
+                                <th>Time</th>
+                                ${clinicians.map(c => `<th>${c.name}</th>`).join('')}
+                            </tr>
+                        </thead>
+                        <tbody>
+                `;
+                let cellTracker = {}; 
+                clinicians.forEach(c => cellTracker[c.id] = { endMinute: -1 });
+                for (let slotTime = START_OF_DAY_MIN; slotTime < END_OF_DAY_MIN; slotTime += SLOT_DURATION) {
+                    const timeStr = minutesToTime(slotTime);
+                    tableHTML += `<tr><th>${timeStr}</th>`;
+                    for (const clinician of clinicians) {
+                        const tracker = cellTracker[clinician.id];
+                        if (slotTime < tracker.endMinute) continue; 
+                        const shiftInfo = clinician.availability[day];
+                        const isWorkingDay = shiftInfo && timeToMinutes(shiftInfo.start) <= slotTime && timeToMinutes(shiftInfo.end) > slotTime;
+                        const booking = isWorkingDay ? getBookingAtSlot(clinician.id, day, slotTime) : null;
+                        let cellContent = '';
+                        let cellClass = '';
+                        let rowSpan = 1;
+                        if (booking) {
+                            const bookingEndMin = timeToMinutes(booking.start) + booking.duration;
+                            rowSpan = booking.duration / SLOT_DURATION;
+                            tracker.endMinute = bookingEndMin;
+                            if (booking.type === 'LUNCH') {
+                                cellContent = 'LUNCH BREAK';
+                                cellClass = 'break-slot';
+                            } else if (booking.type === 'Admin Time') {
+                                cellContent = `Admin/Free${booking.room ? '<br>('+booking.room+')' : ''}`;
+                                cellClass = 'admin-slot';
+                            } else {
+                                let roomName = 'No Room Required';
+                                const apptDetails = ALL_APPOINTMENT_RULES[booking.type];
+                                const category = apptDetails && apptDetails.type === 'capacity_filler' ? 'Capacity-Filler' : (apptDetails && apptDetails.type === 'ab_filler' ? 'A/B Filler' : 'Core Quota');
+                                if (booking.room) roomName = `Room: <strong>${booking.room.toUpperCase()}</strong>`;
+                                else if (apptDetails && apptDetails.rooms.length > 0) roomName = `Room: REQUIRED (Not Assigned)`;
+                                
+                                let colorClass = '';
+                                const typeKey = booking.type;
+                                const room = booking.room;
+                                if (typeKey === 'Tech') {
+                                     if (room === 'Room-A') colorClass = 'color-hae-room-a';
+                                     else if (room === 'Room-B') colorClass = 'color-hae-room-b';
+                                     else if (room === 'Room-C') colorClass = 'color-fitting';
+                                     else if (room === 'Room-D') colorClass = 'color-follow-up';
+                                     else if (room === 'Room-E') colorClass = 'color-hearingtest';
+                                     else colorClass = 'color-tech'; 
+                                } else {
+                                    if (typeKey === 'HAE') colorClass = room === 'Room-A' ? 'color-hae-room-a' : 'color-hae-room-b';
+                                    else if (typeKey === 'Retest') colorClass = room === 'Room-A' ? 'color-retest-room-a' : 'color-retest-room-b';
+                                    else if (typeKey === 'Adjust') colorClass = room === 'Room-A' ? 'color-adjust-room-a' : 'color-adjust-room-b';
+                                    else if (typeKey === 'Fitting') colorClass = 'color-fitting';
+                                    else if (typeKey === 'Follow-up') colorClass = 'color-follow-up';
+                                    else if (typeKey === 'Hearing Test') colorClass = 'color-hearingtest';
+                                    else colorClass = 'appt-slot';
+                                }
+                                cellClass = colorClass;
+                                cellContent = `<span class="font-bold">${booking.type}</span> ${minutesToTime(timeToMinutes(booking.start))}<br>(${booking.duration} min) ${roomName}`;
+                            }
+                        } else if (!isWorkingDay) {
+                            cellContent = 'N/A';
+                            cellClass = 'off-slot';
+                        }
+                        if (rowSpan > 0) tableHTML += `<td class="${cellClass}" ${rowSpan > 1 ? `rowspan="${rowSpan}"` : ''}>${cellContent}</td>`;
+                    }
+                    tableHTML += `</tr>`;
+                }
+                tableHTML += `</tbody></table>`;
+                return tableHTML;
+            }
+            function displayResults(unscheduled) {
+                const scheduleResultsEl = document.getElementById("schedule-results");
+                const unscheduledResultsEl = document.getElementById("unscheduled-results");
+                
+                scheduleResultsEl.innerHTML = '';
+                const workingClinicians = clinicians.filter(c => Object.keys(c.availability).length > 0);
+                const sortedClinicians = [...workingClinicians].sort((a, b) => a.name.localeCompare(b.name));
+                DAY_ORDER.forEach(day => {
+                    const dailyClinicians = sortedClinicians.filter(c => c.availability[day]);
+                    if (dailyClinicians.length > 0) {
+                        const table = generateDailyScheduleTable(day, dailyClinicians);
+                        scheduleResultsEl.innerHTML += table;
+                    }
+                });
+                if (unscheduled.length === 0) {
+                    unscheduledResultsEl.textContent = "All core appointments successfully scheduled, and remaining capacity was filled respecting all strict room constraints.";
+                    unscheduledResultsEl.style.color = "green";
+                    unscheduledResultsEl.style.borderColor = "#c3e6cb";
+                    unscheduledResultsEl.style.backgroundColor = "#d4edda";
+                } else {
+                    unscheduledResultsEl.textContent = unscheduled.map(u => `- ${u.type} on ${u.day} - ${u.reason}`).join('\n');
+                    unscheduledResultsEl.style.color = "#cc0000";
+                    unscheduledResultsEl.style.borderColor = "#ffcccc";
+                    unscheduledResultsEl.style.backgroundColor = "#fdf0f0";
+                }
+            }
+            function shuffleArray(array) { for (let i = array.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [array[i], array[j]] = [array[j], array[i]]; } return array; }
+            function timeToMinutes(str) { const [h,m] = str.split(':').map(Number); return h*60+m; }
+            function minutesToTime(m) { const h = Math.floor(m/60); const mn = m%60; return `${h}:${mn.toString().padStart(2,'0')}`; }
+        });
+    </script>
+</body>
+</html>
